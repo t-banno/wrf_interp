@@ -20,13 +20,14 @@
       CHARACTER (LEN=250)                                :: path_to_input
       CHARACTER (LEN=250)                                :: path_to_output
       CHARACTER (LEN=250)                                :: root_name
-      REAL, DIMENSION(99)                                :: interp_levels
+      REAL, DIMENSION(499)                               :: interp_levels
       INTEGER                                            :: num_interp_levels
       INTEGER                                            :: number_of_input_files
       integer                                            :: grid_id
       integer                                            :: logp
       INTEGER                                            :: extrapolate=0
-      integer                                            :: start_date,vcor
+!      integer                                            :: start_date,vcor
+      integer                                            :: vcor
       logical                                            :: leap_year
       logical                                            :: unstagger_grid
       LOGICAL                                            :: debug=.FALSE.
@@ -776,7 +777,7 @@
            end if
 
 
-!----------------Potential vorticity-------------------------------------------------------
+!!----------------Potential vorticity-------------------------------------------------------
           IF (debug) THEN
                write(6,*) 'VAR: Potential Vorticity'
                write(6,*) '     DIMS OUT: ',dims_out
@@ -836,7 +837,7 @@
       integer                           :: extrapolate,vcor,number_of_input_files
       integer                           :: numchar,year,mo,day,hr,done,index
       integer                           :: num_interp_levels,logp
-      real, dimension(99)               :: interp_levels,temp_level
+      real, dimension(499)              :: interp_levels,temp_level
       real                              :: begv,endv,inc
       character (len=250)               :: path_to_input,format_string
       character (len=250)               :: path_to_output
@@ -864,7 +865,6 @@
         READ(funit,io)
         READ(funit,interp_in)
         CLOSE(funit)
-
 
       ! Get all the input file names
         lent = len_trim(path_to_input)
@@ -1038,6 +1038,7 @@
             rootl = rootl + startl
             root_name(rootl:rootl) = '*'
          end if
+         print *, root_name
 
         !  Build a UNIX command, and "ls", of all of the input files 
         loslen = LEN ( command )
@@ -1175,7 +1176,8 @@
                ilen = len_trim(cval)
             endif
             IF (debug) &
-	      write(6,'("     i = ",i2," : ",A," = ",A)') &
+!	      write(6,'("     i = ",i2," : ",A," = ",A)') &
+	      write(6,'("     i = ",i3," : ",A," = ",A)') &
                     i,cname,cval(1:ilen)
 	    rcode = nf_put_att_text(mcid, nf_global, cname, ilen,&
                       cval(1:ilen))
@@ -1185,7 +1187,8 @@
             IF ( INDEX(cname,'BOTTOM-TOP_PATCH') == 0 ) THEN
 	       IF (cname .eq. 'BOTTOM-TOP_GRID_DIMENSION') ival = num_interp_levels
                IF (debug) &
-	         write(6,'("     i = ",i2," : ",A," = ",i7)') &
+!	         write(6,'("     i = ",i2," : ",A," = ",i7)') &
+	         write(6,'("     i = ",i3," : ",A," = ",i7)') &
                        i,cname,ival        
                rcode = nf_put_att_int(mcid, nf_global, cname, itype,&
                          ilen, ival)
@@ -1194,7 +1197,8 @@
 	  elseif ( itype .eq. 5 ) then    ! real
 	    rcode = nf_get_att_real (ncid, nf_global, cname, rval)
             IF (debug) &
-	      write(6,'("     i = ",i2," : ",A," = ",G18.10E2)') &
+!	      write(6,'("     i = ",i2," : ",A," = ",G18.10E2)') &
+	      write(6,'("     i = ",i3," : ",A," = ",G18.10E2)') &
                     i,cname,rval
 	    rcode = nf_put_att_real(mcid, nf_global, cname, itype,&
                       ilen, rval)
@@ -1278,9 +1282,11 @@
  END SUBROUTINE var_wanted
  
 !--------------------------------------------------------------------- 
- SUBROUTINE handle_err(rcode)
+ SUBROUTINE handle_err(rcode,text)
     INTEGER rcode
+    CHARACTER text*(*)
     write(6,*) 'Error number ',rcode
+    write(6,*) text
     stop
  END SUBROUTINE
 
@@ -2249,7 +2255,7 @@
              dnamej(j) = dnamei(i)
              dvalj(j) = dvali(i)
              times_in_file = dvali(i)
-             rcode = nf_def_dim(mcid, 'time', NF_UNLIMITED, time_ivar)
+             rcode = nf_def_dim(mcid, 'Time', NF_UNLIMITED, time_ivar)
           else
              if (var_name  == 'soil_layers_stag') nsoil = var_value
              if (dnamei(i) == 'bottom_top_stag') wanted = .FALSE.
@@ -2342,29 +2348,29 @@
      dimarray = 1
 
 !Define the time variable and values.
-     jvar  = 1
-     rcode = nf_def_var(mcid, 'time', NF_DOUBLE, 1, 1, jvar)
-     if (rcode .ne. nf_noerr) call handle_err(rcode, "Error defining time variable in out file")
-     att_text = "Hours since 1901-01-01 00:00:00"
-     ilen = len_trim(att_text)
-     rcode = nf_put_att_text(mcid, jvar, "description", ilen, att_text(1:ilen) )
-     rcode = nf_put_att_text(mcid, jvar, "units", ilen, att_text(1:ilen) )
-     ilen = 4
-     rcode = nf_put_att_text(mcid, jvar, "standard_name", ilen,"time" )
-     missing = 9.96920996838687e+36
-     rcode = nf_put_att_double(mcid, jvar, "missing_value", NF_DOUBLE, 1, missing )
+!     jvar  = 1
+!     rcode = nf_def_var(mcid, 'Time', NF_DOUBLE, 1, 1, jvar)
+!     if (rcode .ne. nf_noerr) call handle_err(rcode, "Error defining time variable in out file")
+!     att_text = "Hours since 1901-01-01 00:00:00"
+!     ilen = len_trim(att_text)
+!     rcode = nf_put_att_text(mcid, jvar, "description", ilen, att_text(1:ilen) )
+!     rcode = nf_put_att_text(mcid, jvar, "units", ilen, att_text(1:ilen) )
+!     ilen = 4
+!     rcode = nf_put_att_text(mcid, jvar, "standard_name", ilen,"Time" )
+!     missing = 9.96920996838687e+36
+!     rcode = nf_put_att_double(mcid, jvar, "missing_value", NF_DOUBLE, 1, missing )
 
-     jvar = 2
+     jvar = 1
      ndims = 2
      dimarray(1) = 2  !DateStrLen
      dimarray(2) = 1  !time
      rcode = nf_def_var(mcid, 'Times', NF_CHAR, ndims, dimarray, jvar) 
      ilen  = 20     
-     rcode = nf_put_att_text(mcid, jvar, "description", ilen, "YYYY-MM-DD_hh:mm:ss" )
-     rcode = nf_put_att_text(mcid, jvar, "missing_value", 1, " " )
+!     rcode = nf_put_att_text(mcid, jvar, "description", ilen, "YYYY-MM-DD_hh:mm:ss" )
+!     rcode = nf_put_att_text(mcid, jvar, "missing_value", 1, " " )
      
 !Define the vertical coordinate
-     jvar = 3
+     jvar = 2
      if(vcor .eq. 1) then
         rcode = nf_def_var(mcid, 'LEV', NF_REAL, 1 ,level_ivar, jvar)
         if(rcode .ne. nf_noerr)  then
@@ -2434,69 +2440,69 @@
         rcode = nf_put_att_real(mcid, jvar, "missing_value", NF_REAL, 1, missing )  
      end if 
 
-     ndy(:)=[31,28,31,30,31,30,31,31,30,31,30,31]
+!     ndy(:)=[31,28,31,30,31,30,31,31,30,31,30,31]
      allocate (time_strings(times_in_file))
      rcode = nf_get_var_text (ncid, time_ivar, time_strings )
 
 
-     ndy_leap(:)   = [1,33,61,92,122,153,183,214,245,275,306,336]
-     jvar = 1
-     if(times_in_file .eq. 1) then
-        read (time_strings(1)(1:4),'(i4)') year
-        read (time_strings(1)(6:7),'(i2)') month
-        read (time_strings(1)(9:10),'(i2)') day
-        read (time_strings(1)(12:13),'(i2)') hour
-        read (time_strings(1)(15:16),'(i2)') minute
-        read (time_strings(1)(18:19),'(i2)') sec
-
-        if(leap_year) then
-           ilen = 8
-           rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "standard" )
-           dtime =  wrf_times_2Udunits_c(year,month,day,hour)
-        else
-           ilen  = 6
-           rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "noleap" )
-           ndy_noleap(:) = [1,32,60,91,121,152,182,213,244,274,305,335]
-           iday  = ndy_noleap(month)
-           hrs_per_yr = 365 * 24
-           dtime = (year - 1901) * hrs_per_yr + (iday - 1) * 24 + hour
-       end if
-     else
-         do it = 1,times_in_file
-            read (time_strings(it)(1:4),'(i4)') year
-            read (time_strings(it)(6:7),'(i2)') month
-            read (time_strings(it)(9:10),'(i2)') day
-            read (time_strings(it)(12:13),'(i2)') hour
-            read (time_strings(it)(15:16),'(i2)') minute
-            read (time_strings(it)(18:19),'(i2)') sec
-           if(leap_year) then
-              ilen = 8
-              rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "standard" )
-              dtime_array(it) =  wrf_times_2Udunits_c(year,month,day,hour)
-           else
-              ilen  = 6
-              rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "noleap" )
-              ndy_noleap(:) = [1,32,60,91,121,152,182,213,244,274,305,335]
-              iday  = ndy_noleap(month)
-              hrs_per_yr = 365 * 24
-              dtime_array(it) = (year - 1901) * hrs_per_yr + (iday - 1) * 24 + hour
-          end if  
-       end do
-     end if
+!     ndy_leap(:)   = [1,33,61,92,122,153,183,214,245,275,306,336]
+!     jvar = 1
+!     if(times_in_file .eq. 1) then
+!        read (time_strings(1)(1:4),'(i4)') year
+!        read (time_strings(1)(6:7),'(i2)') month
+!        read (time_strings(1)(9:10),'(i2)') day
+!        read (time_strings(1)(12:13),'(i2)') hour
+!        read (time_strings(1)(15:16),'(i2)') minute
+!        read (time_strings(1)(18:19),'(i2)') sec
+!
+!        if(leap_year) then
+!           ilen = 8
+!           rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "standard" )
+!           dtime =  wrf_times_2Udunits_c(year,month,day,hour)
+!        else
+!           ilen  = 6
+!           rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "noleap" )
+!           ndy_noleap(:) = [1,32,60,91,121,152,182,213,244,274,305,335]
+!           iday  = ndy_noleap(month)
+!           hrs_per_yr = 365 * 24
+!           dtime = (year - 1901) * hrs_per_yr + (iday - 1) * 24 + hour
+!       end if
+!     else
+!         do it = 1,times_in_file
+!            read (time_strings(it)(1:4),'(i4)') year
+!            read (time_strings(it)(6:7),'(i2)') month
+!            read (time_strings(it)(9:10),'(i2)') day
+!            read (time_strings(it)(12:13),'(i2)') hour
+!            read (time_strings(it)(15:16),'(i2)') minute
+!            read (time_strings(it)(18:19),'(i2)') sec
+!           if(leap_year) then
+!              ilen = 8
+!              rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "standard" )
+!              dtime_array(it) =  wrf_times_2Udunits_c(year,month,day,hour)
+!           else
+!              ilen  = 6
+!              rcode = nf_put_att_text(mcid, jvar, "calendar", ilen, "noleap" )
+!              ndy_noleap(:) = [1,32,60,91,121,152,182,213,244,274,305,335]
+!              iday  = ndy_noleap(month)
+!              hrs_per_yr = 365 * 24
+!              dtime_array(it) = (year - 1901) * hrs_per_yr + (iday - 1) * 24 + hour
+!          end if  
+!       end do
+!     end if
 
      
 !Take output file out of define mode so we can put the values of the time and times variables in.
         rcode = nf_enddef(mcid)
+!        jvar  = 1
+!        if(times_in_file .eq. 1) then
+!           rcode = nf_put_vara_double(mcid, jvar, 1, 1, dtime)
+!           if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for dtime")
+!        else
+!           rcode = nf_put_vara_double(mcid, jvar, 1, times_in_file, dtime_array)
+!           if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for dtime")
+!        end if
+!
         jvar  = 1
-        if(times_in_file .eq. 1) then
-           rcode = nf_put_vara_double(mcid, jvar, 1, 1, dtime)
-           if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for dtime")
-        else
-           rcode = nf_put_vara_double(mcid, jvar, 1, times_in_file, dtime_array)
-           if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for dtime")
-        end if
-
-        jvar  = 2
         datestringlen = 19
         dimarray(1) =  datestringlen
         dimarray(2) = times_in_file
@@ -2505,7 +2511,7 @@
         rcode = nf_put_vara_text(mcid, jvar, start_dims, dimarray,time_strings )
         if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for Times")
 
-        jvar = 3
+        jvar = 2
         do i = 1,num_interp_levels
            if(vcor .eq. 1) then  !for pressure levels convert to Pa
               plevels(i) = interp_levels(i) * 100.
