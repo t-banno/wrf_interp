@@ -10,6 +10,7 @@
       IMPLICIT NONE
       
       INCLUDE './netcdf.inc'
+      INCLUDE 'mpif.h'
 
 !      REAL, PARAMETER                                    :: Rd = 287.04
       REAL, PARAMETER                                    :: Rd = 287.
@@ -122,9 +123,22 @@
       LOGICAL                                            :: bit64=.FALSE.
       LOGICAL                                            :: first=.TRUE.
 
+! Variables used for MPI
+      INTEGER                                            :: mpierr, world, rank
+      CHARACTER*5                                        :: crank
+
 ! Parallel Processing Timing Information
 !$    Double Precision :: st, en
 
+   ! MPI initialization
+   CALL MPI_INIT(mpierr)
+   CALL MPI_COMM_SIZE(MPI_COMM_WORLD, world, mpierr)
+   CALL MPI_COMM_RANK(MPI_COMM_WORLD, rank, mpierr)
+   Write(crank,'(I5.5)') rank
+   Open(6,file='rsl.out.'//crank)
+   Open(0,file='rsl.error.'//crank)
+
+   If (rank == 0) Then
 
 !Initialize variables used by the read_namelist routine      
       path_to_input     = './'
@@ -147,7 +161,7 @@
        ALLOCATE ( input_file_names(number_of_input_files)  , STAT=ierr )
        ALLOCATE ( output_file_names(number_of_input_files) , STAT=ierr )
        if(ierr .ne. 0) then
-           print*, ' tried to allocate ', number_of_input_files, ' input files, (look at ./foo)'
+           Write(0,*) ' tried to allocate ', number_of_input_files, ' input files, (look at ./foo)'
            STOP
         END IF
 
@@ -181,7 +195,7 @@
            ENDIF
         END DO
         CLOSE ( 112 )
-        print*, " " 
+        Write(6,*) " " 
 
 !   We clean up our own messes.
         CALL SYSTEM ( '/bin/rm -f .foo'  )
@@ -191,14 +205,32 @@
       write(6,*) 
       write(6,*) "##############################################################"
       write(6,'(A,i4,A)') " RUNNING wrf_interp V1.1 on ", number_of_input_files, " file(s)."
+      End IF
+      CALL MPI_BCAST(path_to_input, 250, MPI_CHARACTER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(path_to_output, 250, MPI_CHARACTER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(interp_levels, 499, MPI_INTEGER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(extrapolate, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(unstagger_grid, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(vcor, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(num_interp_levels, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(leap_year, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(logp, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(debug, 1, MPI_LOGICAL, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(number_of_input_files, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, mpierr)
+      IF (rank /= 0) Then
+         ALLOCATE ( input_file_names(number_of_input_files)  , STAT=ierr )
+         ALLOCATE ( output_file_names(number_of_input_files) , STAT=ierr )
+      End IF
+      CALL MPI_BCAST(input_file_names, 300*number_of_input_files, MPI_CHARACTER, 0, MPI_COMM_WORLD, mpierr)
+      CALL MPI_BCAST(output_file_names, 300*number_of_input_files, MPI_CHARACTER, 0, MPI_COMM_WORLD, mpierr)
 
-
-      
+      CALL MPI_BARRIER(MPI_COMM_WORLD,mpierr)
+      IF (rank < number_of_input_files) THEN
 !!!!!MAIN LOOP OVER NUMBER OF FILES
-     do loop = 1, number_of_input_files
+     do loop = 1+rank, number_of_input_files, world
          input_file  = input_file_names(loop)
          output_file = output_file_names(loop)
-         print *,"Output will be written to: ",trim(output_file)
+         Write(6,*) "Output will be written to: ",trim(output_file)
 
 
          rcode = nf_open(input_file, 0, ncid)
@@ -210,11 +242,11 @@
 !$	st = omp_get_wtime()
          call basic_fileinfo(ncid,ndims,nvars,ngatts,iweg,isng,ibtg,dx,dy)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'basic_fileinfo(): ', en-st
+!$ 	Write(6,*)   'basic_fileinfo(): ', en-st
 !$	st = omp_get_wtime()
          call outfile_attributes(ncid,mcid,debug,ngatts,num_interp_levels)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'outfile_attributes(): ', en-st
+!$ 	Write(6,*)   'outfile_attributes(): ', en-st
 
 
 ! ALLOCATE SOME VARIABLES
@@ -235,18 +267,18 @@
          call def_outfile_dims(ncid,mcid,num_interp_levels,nsoil,ndims,time_ivar,level_ivar, &
                                ndims_out,times_in_file,dnamei,dnamej,dvali,dvalj,unstagger_grid)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_outfile_dims(): ', en-st
+!$ 	Write(6,*)   'def_outfile_dims(): ', en-st
          
-!         print *,"times in file",times_in_file
+!         Write(6,*)  "times in file",times_in_file
          if(times_in_file .eq. 0) then
-            print *,"Unable to get time variable from input file"
+            Write(0,*)  "Unable to get time variable from input file"
             stop
          end if
 !$	st = omp_get_wtime()
          call def_time_level_vars(ncid,mcid,time_ivar,level_ivar,interp_levels, &
                                   num_interp_levels,times_in_file,leap_year,vcor)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_time_level_vars(): ', en-st
+!$ 	Write(6,*)   'def_time_level_vars(): ', en-st
         
 
 ! WE NEED SOME BASIC FIELDS
@@ -275,7 +307,7 @@
 !$	st = omp_get_wtime()
          call getpres(ncid,iweg-1,isng-1,ibtg-1,times_in_file,pres_field)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'getpres(): ', en-st
+!$ 	Write(6,*)   'getpres(): ', en-st
           
 
 !Terrain (HGT field on the wrfout files).
@@ -284,7 +316,7 @@
 !$	st = omp_get_wtime()
          call getterrain(ncid,iweg,isng,times_in_file,terrain)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'getterrain(): ', en-st
+!$ 	Write(6,*)   'getterrain(): ', en-st
 
 
 
@@ -295,14 +327,14 @@
 !$	st = omp_get_wtime()
          call calcght(ncid,iweg,isng,ibtg-1,ibtg,times_in_file,ght)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calcght(): ', en-st
+!$ 	Write(6,*)   'calcght(): ', en-st
 !Temperature degrees K
          IF (ALLOCATED(tk)) deallocate(tk)
          allocate (tk(iweg,isng,ibtg-1, times_in_file ))
 !$	st = omp_get_wtime()
          call calctk(ncid,iweg,isng,ibtg-1,times_in_file,pres_field,tk)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calctk(): ', en-st
+!$ 	Write(6,*)   'calctk(): ', en-st
 
 
 !Relative Humidity and qvapor
@@ -315,7 +347,7 @@
 !$	st = omp_get_wtime()
          call calcrh(iweg,isng,ibtg-1,times_in_file,pres_field,rh,qv,tk)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calcrh(): ', en-st
+!$ 	Write(6,*)   'calcrh(): ', en-st
 
 
 !SFP calculation is done for extrapolation below the ground using RIP's
@@ -335,8 +367,8 @@
             call calcsfp(ncid,iweg,isng,ibtg-1,times_in_file,pres_field, &
                          tk,ght,terrain,sfp,sfpsm)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calcsfp(): ', en-st
-            print *,"Calculated sfp for extrapolation of temperature"
+!$ 	Write(6,*)   'calcsfp(): ', en-st
+            Write(6,*)  "Calculated sfp for extrapolation of temperature"
          end if
 
 
@@ -352,7 +384,7 @@
            call calcpot(ncid,iweg,isng,ibtg-1,times_in_file, &
                         tk,pres_field,qv,vert_pottmps)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calcpot(): ', en-st
+!$ 	Write(6,*)   'calcpot(): ', en-st
         endif
 
         if(vcor .eq. 5) then
@@ -360,7 +392,7 @@
            call calceqpot(ncid,iweg,isng,ibtg-1,times_in_file, &
                           tk,pres_field,qv,vert_pottmps)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calceqpot(): ', en-st
+!$ 	Write(6,*)   'calceqpot(): ', en-st
         endif
 
 
@@ -369,7 +401,7 @@
          mabpl=max(mmax,min(2*mmax-1,401))
          morpl=max(max(iweg,isng),ibtg)+1
          mkzh = ibtg-1
-         print *,"After calculating basic fields from input file"
+         Write(6,*)  "After calculating basic fields from input file"
 
 !-----------------------------------------------------------------------------
 !START PROCESSING FILE VARIABLES
@@ -377,14 +409,14 @@
         loop_variables : DO ivar = 1, nvars        
            rcode = nf_inq_var(ncid, ivar, cval, itype, idm, ishape, natt)
            if(rcode .ne. 0) then
-              print *,"Error reading variable ",ivar," from file"
+              Write(0,*)  "Error reading variable ",ivar," from file"
               stop
            end if
            wanted = 1
 !$	st = omp_get_wtime()
            call var_wanted(cval,idm,itype,wanted,unstagger_grid)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'var_wanted(): ', en-st
+!$ 	Write(6,*)   'var_wanted(): ', en-st
            if(wanted .eq. 0)  CYCLE loop_variables
 
            IF ( trim(cval) == 'U' ) then
@@ -437,9 +469,12 @@
             ENDDO !end the idm loop
 
 
+!$	st = omp_get_wtime()
             rcode = nf_def_var(mcid, cval, itype, idm, jshape, jvar)
+!$	en = omp_get_wtime()
+!$ 	Write(6,*)   'nf_def_var(): ', en-st
             if(rcode .ne. 0) then
-               print *,"ERROR: Unable to write variable ",cval,"to output file"
+               Write(0,*)  "ERROR: Unable to write variable ",cval,"to output file"
                stop
             end if   
 
@@ -503,7 +538,7 @@
 !$ st = omp_get_wtime()
             rcode = nf_get_var_real(ncid, ivar, data1)
 !$ en = omp_get_wtime()
-!$ Print *, 'nf_get_var_real():', en-st, '(', product(dims_in), ')'
+!$ Write(6,*)   'nf_get_var_real():', en-st, '(', product(dims_in), ')'
 
 
 
@@ -512,7 +547,7 @@
                icase = 0
                IF ( dims_in(1) == iweg .AND. .not. unstagger_grid )  then
                    if (debug) then
-                       print *,"UU staggered"
+                       Write(6,*)  "UU staggered"
                    end if
                    allocate (flipp(dims_in(1), dims_in(2), dims_in(3), dims_in(4)))
                    cstag = "stagU  "
@@ -526,18 +561,18 @@
                                        dims_out,iweg,isng,ibtg-1,icase,mabpl,morpl,extrapolate, &
                                        MISSING,ncid,vcor,logp,cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
                    deallocate(flipp)
 !$	st = omp_get_wtime()
                    rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                    deallocate (data1)
                    deallocate (data2)
 
                ELSEIF ( dims_in(2) == isng .AND. .not. unstagger_grid )  then
                    if(debug) then
-                     print *,"VV staggered"
+                     Write(6,*)  "VV staggered"
                    end if
                    allocate (flipp(dims_in(1), dims_in(2), dims_in(3), dims_in(4)))
                    cstag = "stagV  "
@@ -551,12 +586,12 @@
                                        dims_out,iweg,isng,ibtg-1,icase,mabpl,morpl,extrapolate, &
                                        MISSING,ncid,vcor,logp,cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
                    deallocate(flipp)
 !$	st = omp_get_wtime()
                    rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                    deallocate (data1)
                    deallocate (data2)
 
@@ -578,12 +613,12 @@
                                        dims_out,iweg,isng,ibtg-1,icase,mabpl,morpl,extrapolate, &
                                        MISSING,ncid,vcor,logp,cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
                    deallocate(flipp)
 !$	st = omp_get_wtime()
                    rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                    deallocate (data1)
                    deallocate(data3)
 
@@ -604,19 +639,19 @@
                                        dims_out,iweg,isng,ibtg-1,icase,mabpl,morpl,extrapolate,  &
                                        MISSING,ncid,vcor,logp,cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
                    deallocate(flipp)
 !$	st = omp_get_wtime()
                    rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                    deallocate (data1)
                    deallocate(data3)
 
                ELSEIF ( dims_in(3) == ibtg ) THEN
                    cstag = "unstag "
                    if (debug) then
-                      print *,"Processing variable ",cval
+                      Write(6,*)  "Processing variable ",cval
                    end if
                    allocate (flipp(iweg-1, isng-1, ibtg-1, dims_in(4)))
                    allocate (data3(iweg-1, isng-1, ibtg-1, dims_in(4)))
@@ -633,19 +668,19 @@
                                        dims_out,iweg,isng,ibtg-1,icase,mabpl,morpl,extrapolate, &
                                        MISSING,ncid,vcor,logp,cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
                    deallocate(flipp)
 !$	st = omp_get_wtime()
                    rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                    deallocate (data1)
                    deallocate(data3)
 
                ELSE
                   cstag = "unstag "
                   if(debug) then
-                    print *,"Processing variable ",cval
+                    Write(6,*)  "Processing variable ",cval
                   end if
                   allocate (flipp(iweg-1, isng-1, dims_in(3), dims_in(4)))
                   flipp = 0.0
@@ -658,12 +693,12 @@
                                        dims_out,iweg,isng,ibtg-1,icase,mabpl,morpl,extrapolate,  &
                                        MISSING,ncid,vcor,logp,cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
                  deallocate(flipp)
 !$	st = omp_get_wtime()
                  rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                  deallocate (data1)
                  deallocate (data2)
               END IF !This ends the if for idm greater than or equal to 4
@@ -674,7 +709,7 @@
 !$	st = omp_get_wtime()
                   rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                ELSEIF ( dims_in(2) == isng ) THEN
                   data2(:,1:isng-1,:,:) = (data1(:,1:isng-1,:,:) + data1(:,2:isng,:,:)) * .5
                ELSE
@@ -683,7 +718,7 @@
 !$	st = omp_get_wtime()
                rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                deallocate (data1)
                deallocate (data2)
 
@@ -692,7 +727,7 @@
 !$	st = omp_get_wtime()
                rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
                deallocate (data1)
                deallocate (data2)
 	    ENDIF
@@ -703,8 +738,8 @@
 !--------------------END PROCESSING OF FILE VARIABLES--------------`
 !--------------------------------------------------------------------
 !!! We have some special variables we are interested in: 
-        IF ( debug ) print*," "
-        IF ( debug ) print*,"Calculatng some diagnostics"
+        IF ( debug ) Write(6,*)  " "
+        IF ( debug ) Write(6,*)  "Calculatng some diagnostics"
            
         jshape = 0
         DO ii = 1, 4
@@ -739,7 +774,7 @@
 !$	st = omp_get_wtime()
            CALL def_var (mcid, jvar, cval, 5, 4, jshape, "XZY", "Pressure           ", "Pa", "-","XLONG XLAT")
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_var(): ', en-st
+!$ 	Write(6,*)   'def_var(): ', en-st
            rcode = nf_redef(mcid)
            rcode = NF_PUT_ATT_REAL(mcid,jvar,'missing_value',NF_FLOAT,1,MISSING)
            rcode = nf_enddef(mcid)           
@@ -752,7 +787,7 @@
            allocate (data2(dims_out(1),dims_out(2),dims_out(3),dims_out(4)))
            icase = 0
            if((vcor .eq. 2) .and. (extrapolate .eq. 1)) then 
-              print *,"interpolating pressure to height"
+              Write(6,*)  "interpolating pressure to height"
               icase = 5  
            end if
 
@@ -773,7 +808,7 @@
                                times_in_file) 
 
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
            deallocate(flipp)       
            WHERE ( data2 < MISSING )
                      data2 = data2 * 100.  !Convert to Pa from hPa
@@ -781,7 +816,7 @@
 !$	st = omp_get_wtime()
            rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
            deallocate(data2)
         end if   !end if for vcor ne to 1   
   !-----------------------Relative Humidity----------------------------------------------------------
@@ -790,7 +825,7 @@
 !$	st = omp_get_wtime()
            CALL def_var (mcid, jvar,cval, 5, 4, jshape, "XZY", "Relative Humidity  ", "% ", "-","XLONG XLAT")
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_var(): ', en-st
+!$ 	Write(6,*)   'def_var(): ', en-st
            rcode = nf_redef(mcid)
            rcode = NF_PUT_ATT_REAL(mcid,jvar,'missing_value',NF_FLOAT,1,MISSING)
            rcode = nf_enddef(mcid)  
@@ -812,7 +847,7 @@
                                ibtg-1,icase,mabpl,morpl,extrapolate,MISSING,ncid,vcor,logp,     &
                                cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
 
            WHERE ( data2 > 100.0 .and. data2 < 1000. )
               data2 = 100.0
@@ -820,7 +855,7 @@
 !$	st = omp_get_wtime()
            rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
            IF (debug) then
                write(6,*) "Wrote out Relative Humidity"
            end if 
@@ -831,7 +866,7 @@
 !$	st = omp_get_wtime()
         CALL def_var (mcid, jvar, cval, 5, 4, jshape, "XZY", "Temperature        ", "K ","-","XLONG XLAT")
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_var(): ', en-st
+!$ 	Write(6,*)   'def_var(): ', en-st
         rcode = nf_redef(mcid)
         rcode = NF_PUT_ATT_REAL(mcid,jvar,'missing_value',NF_FLOAT,1,MISSING)
         rcode = nf_enddef(mcid)
@@ -851,12 +886,12 @@
                             ibtg-1,icase,mabpl,morpl,extrapolate,MISSING,ncid,vcor,logp,    &
                             cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
 
 !$	st = omp_get_wtime()
         rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
         if (rcode .ne. nf_noerr) call handle_err(rcode,"unable to put TT variable to out file")
 !       IF (debug) write(6,*) "Wrote out temperature TT"
         deallocate(data2)
@@ -874,7 +909,7 @@
 !$	st = omp_get_wtime()
            CALL def_var (mcid, jvar, cval, 5, 4, jshape, "XZY", "Geopotential Height","M ","-","XLONG XLAT")
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_var(): ', en-st
+!$ 	Write(6,*)   'def_var(): ', en-st
   
            rcode = nf_redef(mcid)
            rcode = NF_PUT_ATT_REAL(mcid,jvar,'missing_value',NF_FLOAT,1,MISSING)
@@ -892,12 +927,12 @@
                                ibtg-1,icase,mabpl,morpl,extrapolate,MISSING,ncid,vcor,logp,        &
                                cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
 
 !$	st = omp_get_wtime()
            rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
            IF (debug) THEN
                write(6,*) "Wrote out Geopotential Height"
            ENDIF
@@ -915,7 +950,7 @@
          CALL calcpvo(pvo,pres_field,ncid,nvars,ibtg-1,isng,iweg,times_in_file, &
                      u_ivar, v_ivar,dx,dy)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'calcpvo(): ', en-st
+!$ 	Write(6,*)   'calcpvo(): ', en-st
         
         allocate (data2(dims_out(1),dims_out(2),dims_out(3),dims_out(4)))
         jvar = jvar + 1
@@ -923,7 +958,7 @@
 !$	st = omp_get_wtime()
         CALL def_var (mcid, jvar,cval, 5, 4, jshape, "XZY", "Potenial Vorticity  ", "PVU", "-","XLONG XLAT")
 !$	en = omp_get_wtime()
-!$ 	Print *, 'def_var(): ', en-st
+!$ 	Write(6,*)   'def_var(): ', en-st
         rcode = nf_redef(mcid)
         rcode = NF_PUT_ATT_REAL(mcid,jvar,'missing_value',NF_FLOAT,1,MISSING)
         rcode = nf_enddef(mcid)  
@@ -938,12 +973,12 @@
                             ibtg-1,icase,mabpl,morpl,extrapolate,MISSING,ncid,vcor,logp,      &
                             cstag,times_in_file)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'special_intrp(): ', en-st
+!$ 	Write(6,*)   'special_intrp(): ', en-st
 
 !$	st = omp_get_wtime()
         rcode = nf_put_vara_real (mcid, jvar, start_dims, dims_out, data2)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
+!$ 	Write(6,*)   'nf_put_vara_real(): ', en-st, '(', product(dims_out), ')'
         IF (debug) then
             write(6,*) "Wrote out Potential Voriticty"
         end if         
@@ -955,12 +990,17 @@
         rcode = nf_close(ncid)
         rcode = nf_close(mcid)
       end do  !end of main loop over number of files
-      
-
+   END IF
+   CALL MPI_BARRIER(MPI_COMM_WORLD,mpierr)
+   Close(6)
+   Close(0)
 
       deallocate(input_file_names)
       deallocate(output_file_names)
-      print *,"-------------SUCCESS----------------"
+      Write(6,*)  "-------------SUCCESS----------------"
+
+! MPI finalization
+      CALL MPI_FINALIZE(mpierr)
 
  END PROGRAM wrf_interp
 !---------------------------------------------------------------------
@@ -1063,14 +1103,14 @@
 
 
       if(vcor .eq. 0) then
-         print *,"Undefined vertical coordinate"
-         print *,"Choices are:"
-         print *,"             pressure(hPa)"
-         print *,"             log_pres(hPa)"
-         print *,"             ght_msl (km)"
-         print *,"             ght_agl (km)"
-         print *,"             theta(K)"
-         print *,"             theta-e(K)"
+         Write(0,*) "Undefined vertical coordinate"
+         Write(0,*) "Choices are:"
+         Write(0,*) "             pressure(hPa)"
+         Write(0,*) "             log_pres(hPa)"
+         Write(0,*) "             ght_msl (km)"
+         Write(0,*) "             ght_agl (km)"
+         Write(0,*) "             theta(K)"
+         Write(0,*) "             theta-e(K)"
          stop
       end if
 
@@ -1093,7 +1133,7 @@
          end do
 
          if(index .eq. 0) then
-            print *,"Error reading interpolation level information"
+            Write(0,*) "Error reading interpolation level information"
             stop
          end if
 
@@ -1104,7 +1144,7 @@
             begv = interp_levels(negindex - 1)
             endv = -interp_levels(negindex)
             inc  = interp_levels(negindex+1)
-            print *,begv,endv,inc
+            Write(6,*) begv,endv,inc
             if(begv .gt. endv) addinc = -1
             done = 0
             index = 2
@@ -1135,16 +1175,16 @@
 
            end if !if for negindex
  
-           print *,"---------------------"
+           Write(6,*) "---------------------"
 
 
          if(num_interp_levels .eq. 1) then
-            print *," You need at least two interpolation levels"
+            Write(0,*) " You need at least two interpolation levels"
             stop
          end if
             
          do index = 1,num_interp_levels
-               print *,index,interp_levels(index)
+               Write(6,*) index,interp_levels(index)
          end do
 
 !Start building the file name from the namelist parameters grid_id and start_date
@@ -1161,9 +1201,9 @@
         else if (grid_id .eq. 3) then
            root_name(rootl:numchar) = "_d03_"
         else
-           print *,"Invlaid grid_id in namelist.vinterp"
-           print *,"Valid grid_id's are 1 2 or 3"
-           print *,"If you have more than three nests please modify the code in read_namelist"
+           Write(0,*) "Invlaid grid_id in namelist.vinterp"
+           Write(0,*) "Valid grid_id's are 1 2 or 3"
+           Write(0,*) "If you have more than three nests please modify the code in read_namelist"
            stop
         end if
         rootl = rootl + 5
@@ -1178,7 +1218,7 @@
             rootl = rootl + startl
             root_name(rootl:rootl) = '*'
          end if
-         print *, root_name
+         Write(6,*) root_name
 
         !  Build a UNIX command, and "ls", of all of the input files 
         loslen = LEN ( command )
@@ -1203,9 +1243,9 @@
   
         !  If there are zero files, we are toast.
         IF ( number_of_input_files .LE. 0 ) THEN
-           print*, ' Oops, we need at least ONE input file for the program to read.'
-           print*, '       Make sure you have the path, and name file(s) correct,'
-           print*, '       including wild characters if needed.'
+           Write(0,*) ' Oops, we need at least ONE input file for the program to read.'
+           Write(0,*) '       Make sure you have the path, and name file(s) correct,'
+           Write(0,*) '       including wild characters if needed.'
            STOP
         END IF
   
@@ -1255,31 +1295,31 @@
 
     rcode = nf_get_att_int  (ncid, nf_global, 'WEST-EAST_GRID_DIMENSION', iweg)
     if (rcode .ne. nf_noerr) then
-        print *,"ERROR: Unable read grid dimensions"
+        Write(0,*) "ERROR: Unable read grid dimensions"
         stop
     endif
 
     rcode = nf_get_att_int  (ncid, nf_global, 'SOUTH-NORTH_GRID_DIMENSION', isng)
     if (rcode .ne. nf_noerr) then
-        print *,"ERROR: Unable read grid dimensions"
+        Write(0,*) "ERROR: Unable read grid dimensions"
         stop
     endif
 
     rcode = nf_get_att_int  (ncid, nf_global, 'BOTTOM-TOP_GRID_DIMENSION', ibtg)
     if (rcode .ne. nf_noerr) then
-        print *,"ERROR: Unable read grid dimensions"
+        Write(0,*) "ERROR: Unable read grid dimensions"
         stop
     endif
 
     rcode = nf_get_att_real (ncid, nf_global, 'DX', dx)
     if (rcode .ne. nf_noerr) then
-        print *,"ERROR: Unable read grid spacing"
+        Write(0,*) "ERROR: Unable read grid spacing"
         stop
     endif
 
     rcode = nf_get_att_real (ncid, nf_global, 'DY', dy)
     if (rcode .ne. nf_noerr) then
-        print *,"ERROR: Unable read grid spacing"
+        Write(0,*) "ERROR: Unable read grid spacing"
         stop
     endif            
     
@@ -1398,13 +1438,13 @@
      end if
 
      IF ( idm >= 4 .AND. itype == 4 ) THEN
-            print*,"NOTE: We cannot deal with 3D integers - maybe later"
+            Write(6,*) "NOTE: We cannot deal with 3D integers - maybe later"
             wanted = 0
             return
      ENDIF
 
      IF ( itype == 6 ) THEN
-            print*,"NOTE: We cannot deal with double precision data - maybe later"
+            Write(6,*) "NOTE: We cannot deal with double precision data - maybe later"
             wanted = 0
             return
      ENDIF
@@ -1414,7 +1454,7 @@
           wanted = 1
           return
      ELSE
-          print*,"NOTE: Do not understand this data type ", itype, " skip field."
+          Write(6,*) "NOTE: Do not understand this data type ", itype, " skip field."
           wanted = 0
           return
      ENDIF  
@@ -2009,7 +2049,7 @@
 !by the user.
 
 !sherrie
-!$    Print *, 'Parallel processing starts!'
+!$    Write(6,*) 'Parallel processing starts!'
 !$ st = omp_get_wtime()
 !$OMP PARALLEL DO default(firstprivate),shared(times_in_file,numlevels,njx,niy,mkzh,interp_levels,sclht,vcarray,datain,dataout,prshpa,ght,tk,qv,terrain,sfp,sfpsm,iweg,isng,nz,it,mabpl,morpl,vcor,icase,ncid,rmsg,cvcord)
       do it = 1,times_in_file
@@ -2069,8 +2109,8 @@
                       vcp1  = log(vcp1)
                       vcp0  = log(vcp0)
                       if(vlev .eq. 0.0) then
-                         print *,"Pressure value = 0"
-                         print *,"Unable to take log of 0"
+                         Write(0,*) "Pressure value = 0"
+                         Write(0,*) "Unable to take log of 0"
                          stop
                      end if
                      tmpvlev  = log(vlev)
@@ -2140,9 +2180,9 @@
         end do  !for loop over number of user requested interp levels
       end do  !for loop over number of times in the file
 !$OMP END PARALLEL DO
-!$    Print *, 'Parallel processing finished!'
+!$    Write(6,*) 'Parallel processing finished!'
 !$ en = omp_get_wtime()
-!$ Print *, 'Parallel processing Time: ', en-st
+!$ Write(6,*) 'Parallel processing Time: ', en-st
 
        return
        end  SUBROUTINE special_intrp
@@ -2190,7 +2230,7 @@
 
       themin = 999
       themax = -999
-!$ Print *, 'Parallel Processing starts!'
+!$ Write(6,*) 'Parallel Processing starts!'
 !$ st = omp_get_wtime()
 !$OMP PARALLEL DO default(firstprivate), shared(times_in_file, NZ, ns, ew, dx, dy, cor, mapu, mapv, mapm, uu, vv, tt, pres, temp_pvo)
       do it = 1,times_in_file
@@ -2231,9 +2271,9 @@
       END DO
       end do !times_in_file loop
 !$OMP END PARALLEL DO
-!$    Print *, 'Parallel processing finished!'
+!$    Write(6,*) 'Parallel processing finished!'
 !$ en = omp_get_wtime()
-!$ Print *, 'Parallel processing Time: ', en-st
+!$ Write(6,*) 'Parallel processing Time: ', en-st
 
 !Flip the temp_pvo array so we can interpolate it
       do k=1,nz
@@ -2566,7 +2606,7 @@
 
     
      if(vcor .eq. 4) then  
-        print *,"Temperature"
+        Write(6,*) "Temperature"
         rcode = nf_def_var(mcid, 'LEV', NF_REAL, 1 ,level_ivar, jvar)
         if(rcode .ne. nf_noerr)  then
            call handle_err(rcode, "Unable to create vertical coordinate level variable")
@@ -2581,7 +2621,7 @@
 
 
      if(vcor .eq. 5) then  
-        print *,"Potential Temperature"
+        Write(6,*) "Potential Temperature"
         rcode = nf_def_var(mcid, 'LEV', NF_REAL, 1 ,level_ivar, jvar)
         if(rcode .ne. nf_noerr)  then
            call handle_err(rcode, "Unable to create vertical coordinate level variable")
@@ -2665,7 +2705,7 @@
 !$	st = omp_get_wtime()
         rcode = nf_put_vara_text(mcid, jvar, start_dims, dimarray,time_strings )
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', product(dimarray), ')'
+!$ 	Write(6,*) 'nf_put_vara_real(): ', en-st, '(', product(dimarray), ')'
         if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for Times")
 
         jvar = 2
@@ -2680,7 +2720,7 @@
 !$	st = omp_get_wtime()
         rcode = nf_put_vara_real(mcid, jvar,1,num_interp_levels, plevels)
 !$	en = omp_get_wtime()
-!$ 	Print *, 'nf_put_vara_real(): ', en-st, '(', num_interp_levels, ')'
+!$ 	Write(6,*) 'nf_put_vara_real(): ', en-st, '(', num_interp_levels, ')'
         if(rcode .ne. nf_noerr)  call handle_err(rcode, "Error putting values for pressure levels")
 
         deallocate(time_strings)
@@ -2731,9 +2771,9 @@
 !$ st = omp_get_wtime()
          rcode = nf_def_var(mcid, trim(cval), NF_REAL, idm, jshape, jvar)
 !$ en = omp_get_wtime()
-!$ Print *, 'nf_def_var():', en-st
+!$ Write(6,*) 'nf_def_var():', en-st
          if (rcode .ne. nf_noerr) then
-             print *,"rcode = ",rcode,"Unable to put variable ",cval
+             Write(0,*) "rcode = ",rcode,"Unable to put variable ",cval
              stop
          end if
       ENDIF
@@ -3158,14 +3198,14 @@
        terrain(:,:) = 0.0
        rcode = nf_inq_varid    ( ncid, "HGT", ivar )
        if(rcode .ne.  nf_noerr) then
-          print *,"Unable to get HGT netcdf id"
+          Write(0,*) "Unable to get HGT netcdf id"
           call handle_err(rcode)
        endif
 
 
        rcode = nf_get_var_real ( ncid, ivar, hgt )
        if(rcode .ne.  nf_noerr) then
-          print *,"Unable to get HGT variable"
+          Write(0,*) "Unable to get HGT variable"
           call handle_err(rcode)
        endif      
 
@@ -3207,26 +3247,26 @@
 
       rcode = nf_inq_varid    ( ncid, "PH", ivar )
       if (rcode .ne. nf_noerr) then
-          print *,"Error getting netcdf variable for PH in calcght"
+          Write(0,*) "Error getting netcdf variable for PH in calcght"
           call handle_err(rcode)
       endif
 
       rcode = nf_get_var_real ( ncid, ivar, ph )
       if (rcode .ne. nf_noerr) then
-          print *,"Error reading in variable PH for input netcdf file"
+          Write(0,*) "Error reading in variable PH for input netcdf file"
           call handle_err(rcode)
       endif
 
 
       rcode = nf_inq_varid    ( ncid, "PHB", ivar )
       if (rcode .ne. nf_noerr) then
-          print *,"Error getting netcdf id for PHB in calcght"
+          Write(0,*) "Error getting netcdf id for PHB in calcght"
           call handle_err(rcode)
       endif
 
       rcode = nf_get_var_real ( ncid, ivar, phb )
       if (rcode .ne. nf_noerr) then
-          print *,"Error reading in variable PHB for input netcdf file"
+          Write(0,*) "Error reading in variable PHB for input netcdf file"
           call handle_err(rcode)
       endif
 
@@ -3252,13 +3292,13 @@
       allocate (znu(nz,times_in_file))
       rcode = nf_inq_varid ( ncid, "ZNU", ivar )
       if (rcode .ne. nf_noerr) then
-          print *,"Error reading ZNU netcdf id in calcght"
+          Write(0,*) "Error reading ZNU netcdf id in calcght"
           call handle_err(rcode)
       endif
 
       rcode = nf_get_var_real ( ncid, ivar, znu )
       if (rcode .ne. nf_noerr) then
-          print *,"Error reading ZNU variable in calcght"
+          Write(0,*) "Error reading ZNU variable in calcght"
           call handle_err(rcode)
       endif 
 
@@ -3267,7 +3307,7 @@
       rcode = nf_inq_varid ( ncid, "ZNW", ivar )
       rcode = nf_get_var_real ( ncid, ivar, znw )
       if (rcode .ne. nf_noerr) then
-          print *,"Error reading ZNW variable in calcght"
+          Write(0,*) "Error reading ZNW variable in calcght"
           call handle_err(rcode)
       endif 
      
